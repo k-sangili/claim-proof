@@ -40,19 +40,26 @@ MODEL_API_KEY=<your key> python3 server.py
 
 Or open `index.html` directly for the browser-only version (no saved claims, no live models).
 
+### Storage: SQLite + local image files
+
+- Claims live in SQLite (`claimproof.db`, table `claims`) — not a JSON file. Reopening a claim returns its verdicts, totals, evidence, and photo URLs.
+- Photos live as files in `uploads/` (`<claim_id>_before.<ext>`, `<claim_id>_after.<ext>`), served at `GET /api/uploads/<filename>`. Only `png`, `jpeg`, `webp`, and `gif` data URLs are accepted, and the upload route guards against path traversal.
+- Both `claimproof.db` and `uploads/` are git-ignored local state. For a hosted deployment, swap `uploads/` for object storage (S3-style) and back up the DB file — the claim record already stores photo paths, so that swap is contained.
+
 ### API
 
 | Endpoint | What it does |
 |---|---|
-| `GET /api/health` | Reports `live` vs `local` mode and the model IDs in use |
-| `POST /api/verify` | `{scope, estimate, before?, after?, evidence?}` → saved claim with rows + totals |
+| `GET /api/health` | Reports `live` vs `local` mode, model IDs, and `sqlite+uploads` storage |
+| `POST /api/verify` | `{scope, estimate, before?, after?, evidence?}` → saved claim with rows + totals + photo URLs |
 | `GET /api/claims`, `GET /api/claims/<id>` | List / fetch saved claims |
 | `POST /api/claims/<id>/evidence` | Update photo evidence for a claim, verdicts recompute |
 | `GET /api/report/<id>` | Markdown report download |
+| `GET /api/uploads/<file>` | Stored before/after photo |
 
 ### Environment
 
-See `.env.example`. The only secret is `MODEL_API_KEY` — never commit it. `claims.json` is local state and is git-ignored.
+See `.env.example`. The only secret is `MODEL_API_KEY` — never commit it. `claimproof.db` and `uploads/` are local state and are git-ignored.
 
 ## How it works
 
@@ -97,7 +104,7 @@ The cost-smart split matters on a $150 credit budget: Wonder runs only on the ph
 - **Zero-dependency backend:** Python standard library only (`server.py`), so the app runs anywhere Python does with no install step to break during a demo.
 - **Deterministic fallback:** the local parser/matcher is rule-based and auditable — same input, same verdict, with a match score shown per line.
 - **Human-in-the-loop by design:** photo evidence is a separate, explicit step. "Confirms" is the only path from Not Evidenced to Done in local mode.
-- **Real persistence:** claims save to `claims.json`, evidence updates recompute verdicts and totals, reports export as Markdown.
+- **Real persistence:** claims save to SQLite, photos save as files in `uploads/`, evidence updates recompute verdicts and totals, reports export as Markdown.
 - **No silent failures:** missing key, API error, and empty SAM match are three different states, and the UI/backend distinguish all three.
 - **Tested:** backend verified end-to-end Nov 3, 2026 — sample claim returns $6,080 billed / $4,580 verified / $1,500 flagged, 2/4 lines verified, and a correct Markdown report.
 
