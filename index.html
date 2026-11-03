@@ -62,12 +62,14 @@
 
 <h2>1. Inputs</h2>
 <div class="grid">
-  <div><label><strong>Insurer approved scope</strong> — one box per item</label>
+  <div><label><strong>Insurer approved scope</strong> — one box per item, or upload the document</label>
   <div id="scopeItems"></div>
-  <button class="secondary" id="addScope">+ Add scope item</button></div>
-  <div><label><strong>Contractor estimate</strong> — one box per item</label>
+  <button class="secondary" id="addScope">+ Add scope item</button>
+  <p><input type="file" id="scopeDoc" accept=".pdf,.docx,.txt,.csv,.md"> <button class="secondary" id="parseScopeDoc">Parse uploaded doc</button><br><small id="scopeDocOut">Upload what you got from the assessor — with a model key it is parsed by AI, otherwise by the built-in parser. Parsed rows stay editable.</small></p></div>
+  <div><label><strong>Contractor estimate</strong> — one box per item, or upload the document</label>
   <div id="estimateItems"></div>
-  <button class="secondary" id="addEstimate">+ Add estimate item</button></div>
+  <button class="secondary" id="addEstimate">+ Add estimate item</button>
+  <p><input type="file" id="estimateDoc" accept=".pdf,.docx,.txt,.csv,.md"> <button class="secondary" id="parseEstimateDoc">Parse uploaded doc</button><br><small id="estimateDocOut">Upload what you got from the assessor — with a model key it is parsed by AI, otherwise by the built-in parser. Parsed rows stay editable.</small></p></div>
 </div>
 <p>
   <button id="run">Run verification</button>
@@ -204,6 +206,48 @@ function itemsToText(items){ return items.map(i=>`${i.description} | ${i.amount}
 addItemRow('scopeItems'); addItemRow('estimateItems');
 document.getElementById('addScope').addEventListener('click', ()=>addItemRow('scopeItems'));
 document.getElementById('addEstimate').addEventListener('click', ()=>addItemRow('estimateItems'));
+// ---- Doc upload: assessor document -> item rows (AI with a key, rule parser without) ----
+async function parseDoc(fileInputId, containerId, outId, kind){
+  const out = document.getElementById(outId);
+  const file = document.getElementById(fileInputId).files[0];
+  if (!file) { out.textContent = 'Choose a file first (.pdf, .docx, .txt, .csv).'; return; }
+  out.textContent = 'Parsing…';
+  const reader = new FileReader();
+  reader.onload = async ()=>{
+    try {
+      const res = await fetch('/api/parse-doc', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({filename: file.name, data_url: reader.result, kind})});
+      const data = await res.json();
+      if (!res.ok) { out.textContent = 'Could not parse: ' + (data.error || res.status); return; }
+      if (!data.items.length) { out.textContent = 'No line items found in this document — check the rows and add items manually.'; return; }
+      document.getElementById(containerId).innerHTML = '';
+      data.items.forEach(i=>addItemRow(containerId, i.description, i.amount));
+      out.textContent = `Parsed ${data.items.length} items from ${file.name} (${data.mode === 'live' ? 'AI' : 'built-in parser'}). Review and edit the rows, then run verification. ${data.note || ''}`;
+    } catch(e) {
+      // Browser-only fallback for plain-text files when the server is not running.
+      if (/\.(txt|csv|md)$/i.test(file.name)) {
+        const text = await file.text();
+        const items = [];
+        text.split(/\r?\n/).forEach(line=>{
+          const amounts = line.match(/\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})|\$?\d+(?:\.\d{2})/g);
+          if (!amounts) return;
+          const desc = line.replace(/\$?\d[\d,]*(\.\d{2})?/g, '').replace(/[^A-Za-z0-9 ,\-/&()]+/g, ' ').replace(/\s+/g, ' ').trim();
+          if (desc.length >= 4 && !/total|deductible|depreciation|tax/i.test(desc))
+            items.push({description: desc, amount: parseFloat(amounts[amounts.length-1].replace(/[$,]/g, ''))});
+        });
+        if (!items.length) { out.textContent = 'No line items found in this document.'; return; }
+        document.getElementById(containerId).innerHTML = '';
+        items.forEach(i=>addItemRow(containerId, i.description, i.amount));
+        out.textContent = `Parsed ${items.length} items from ${file.name} (built-in parser, no server). Review and edit the rows, then run verification.`;
+      } else {
+        out.textContent = 'Doc parsing needs the Python server running — start it with python3 server.py, then try again.';
+      }
+    }
+  };
+  reader.readAsDataURL(file);
+}
+document.getElementById('parseScopeDoc').addEventListener('click', ()=>parseDoc('scopeDoc', 'scopeItems', 'scopeDocOut', 'scope'));
+document.getElementById('parseEstimateDoc').addEventListener('click', ()=>parseDoc('estimateDoc', 'estimateItems', 'estimateDocOut', 'estimate'));
 document.getElementById('run').addEventListener('click', async ()=>{
   const scopeText = itemsToText(collectItems('scopeItems'));
   const estimateText = itemsToText(collectItems('estimateItems'));
