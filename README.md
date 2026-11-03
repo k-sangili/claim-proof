@@ -25,6 +25,10 @@ A landlord in one state, a rental in another, and a repair stuck in a three-way 
 4. **Review and export:** change a photo-evidence dropdown to update a verdict, download the Markdown report, or send an assessor upload link for more photos.
 5. **Honesty line:** low-confidence items stay flagged for a human — never auto-approved.
 
+## Doc upload (AI parse)
+
+Instead of typing items by hand, upload the document you got from the assessor — a `.pdf`, `.docx`, `.txt`, or `.csv` — next to the scope or estimate list and click **Parse uploaded doc**. With `MODEL_API_KEY` set, Muse Spark parses it into line items; without a key, the built-in parser reads amount-bearing lines and drops summary lines (totals, deductible, depreciation, tax). Parsed rows fill the item boxes and stay fully editable — review them before running verification. Scanned image-only PDFs have no text layer and cannot be parsed this way.
+
 ## Assessor photo upload (via a link)
 
 After running a verification, click **Create assessor upload link** in section 4. Send that link to the assessor: they open it (no login) and upload before/after photos for that claim. The link is a bearer token — anyone with it can attach photos, so share it only with the assessor and click **Revoke upload links** once the photos are in. The assessor can attach photos only; they cannot change scope, estimate, or verdicts. (This needs the Python backend; the static page alone cannot host upload links.)
@@ -56,6 +60,7 @@ Or open `index.html` directly for the browser-only version (no saved claims, no 
 |---|---|
 | `GET /api/health` | Reports `live` vs `local` mode, model IDs, and `sqlite+uploads` storage |
 | `POST /api/verify` | `{scope, estimate, before?, after?, evidence?}` → saved claim with rows + totals + photo URLs |
+| `POST /api/parse-doc` | `{filename, data_url, kind: "scope"\|"estimate"}` → parsed line items (AI with a key, rule parser without) |
 | `GET /api/claims`, `GET /api/claims/<id>` | List / fetch saved claims |
 | `POST /api/claims/<id>/evidence` | Update photo evidence for a claim, verdicts recompute |
 | `GET /api/report/<id>` | Markdown report download |
