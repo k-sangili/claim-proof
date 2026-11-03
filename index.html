@@ -51,32 +51,26 @@
 <div class="brandbar" aria-hidden="true"></div>
 <h1>ClaimProof — MVP v0</h1>
 <p class="sub">Remote repair verification: approved scope + contractor estimate + before/after photos → Done / Not Evidenced / Out of Scope, per line item.</p>
-<div class="banner" id="modeBanner"><strong>Working app.</strong> Run <code>python3 server.py</code> and this page talks to the backend: claims are saved, reports export, and — with <code>MODEL_API_KEY</code> set — Muse Spark / SAM 3.1 / Muse Wonder run live. Without a key it runs in local mode (rule-based + human photo review) and says so. Sample data below is <strong>synthetic</strong>, not a real claim.</div>
+<div class="banner" id="modeBanner"><strong>Working app.</strong> Run <code>python3 server.py</code> and this page talks to the backend: claims are saved, reports export, and — with <code>MODEL_API_KEY</code> set — Muse Spark / SAM 3.1 / Muse Wonder run live. Without a key it runs in local mode (rule-based + human photo review) and says so.</div>
 
 <h2>1. Inputs</h2>
 <div class="grid">
   <div><label><strong>Insurer approved scope</strong> — one item per line, <code>Description | $amount</code></label>
-  <textarea id="scope">Replace damaged siding panels, north elevation | 4200
-Replace house wrap behind north panels | 650
-Caulk and seal north elevation joints | 380</textarea></div>
+  <textarea id="scope" placeholder="Example: Roof shingles | 5000"></textarea></div>
   <div><label><strong>Contractor estimate</strong> — one item per line, <code>Description | $amount</code></label>
-  <textarea id="estimate">Replace damaged siding panels, north elevation | 4200
-Replace house wrap behind north panels | 650
-Caulk and seal north elevation joints | 380
-Paint trim, north elevation | 850</textarea></div>
+  <textarea id="estimate" placeholder="Example: Roof shingles | 5000"></textarea></div>
 </div>
 <p>
   <button id="run">Run verification</button>
-  <button class="secondary" id="sample">Load sample claim</button>
 </p>
 
 <h2>2. Before / after photos</h2>
-<p>Upload your own photos, or use the sample flow without photos — photo review is a separate step below, not an automatic pass.</p>
+<p>Upload your photos — photo review is a separate step below, not an automatic pass.</p>
 <div class="photos">
   <figure><label>Before<br><input type="file" id="beforeFile" accept="image/*"></label><div><img id="beforeImg" alt="Before photo preview"></div></figure>
   <figure><label>After<br><input type="file" id="afterFile" accept="image/*"></label>
-    <div class="overlay-wrap"><img id="afterImg" alt="After photo preview"><div class="overlay" id="samOverlay">DEMO SAM OVERLAY — work area</div></div>
-    <label><input type="checkbox" id="samToggle"> Show demo SAM overlay (placeholder, not real segmentation)</label>
+    <div class="overlay-wrap"><img id="afterImg" alt="After photo preview"><div class="overlay" id="samOverlay">SAM OVERLAY — work area</div></div>
+    <label><input type="checkbox" id="samToggle"> Show SAM overlay (placeholder, not real segmentation)</label>
   </figure>
 </div>
 
@@ -125,9 +119,9 @@ document.getElementById('revokeLink').addEventListener('click', async ()=>{
 // Endpoints / request shapes must be confirmed against Meta's current Model API docs
 // before shipping — these stubs intentionally do NOT fake a live response.
 const MODELS = { spark: 'muse-spark-1.3', sam: 'sam-3.1', wonder: 'muse-wonder-1.0' };
-async function callSpark(prompt){ if(!window.CLAIMPROOF_API_KEY) return {mode:'demo', note:'No API key set — rule-based engine used instead.'}; throw new Error('Live Spark call not wired to a verified endpoint yet.'); }
-async function callSAM(image, prompt){ if(!window.CLAIMPROOF_API_KEY) return {mode:'demo', note:'No API key set — demo overlay used instead.'}; throw new Error('Live SAM call not wired to a verified endpoint yet.'); }
-async function callWonder(beforeImg, afterImg, mask){ if(!window.CLAIMPROOF_API_KEY) return {mode:'demo', note:'No API key set — human photo review used instead.'}; throw new Error('Live Wonder call not wired to a verified endpoint yet.'); }
+async function callSpark(prompt){ if(!window.CLAIMPROOF_API_KEY) return {mode:'local', note:'No API key set — rule-based engine used instead.'}; throw new Error('Live Spark call not wired to a verified endpoint yet.'); }
+async function callSAM(image, prompt){ if(!window.CLAIMPROOF_API_KEY) return {mode:'local', note:'No API key set — placeholder overlay used instead.'}; throw new Error('Live SAM call not wired to a verified endpoint yet.'); }
+async function callWonder(beforeImg, afterImg, mask){ if(!window.CLAIMPROOF_API_KEY) return {mode:'local', note:'No API key set — human photo review used instead.'}; throw new Error('Live Wonder call not wired to a verified endpoint yet.'); }
 
 // ---- MVP verdict engine (transparent, rule-based) ----
 function parseLines(text){
@@ -204,17 +198,6 @@ document.getElementById('run').addEventListener('click', async ()=>{
     scope.forEach(s=>{ const sc=overlap(e.description, s.description); if(sc>bestScore){bestScore=sc; best=s;} });
     const match = bestScore >= 0.4 ? best.description : null;
     return { description:e.description, amount:e.amount, match, evidence:'none', verdict: match ? 'Not Evidenced' : 'Out of Scope' };
-  });
-  render();
-});
-document.getElementById('sample').addEventListener('click', ()=>{
-  // Synthetic demo: siding + caulk confirmed in the sample story, house wrap not evidenced, trim out of scope.
-  document.getElementById('scope').value = "Replace damaged siding panels, north elevation | 4200\nReplace house wrap behind north panels | 650\nCaulk and seal north elevation joints | 380";
-  document.getElementById('estimate').value = "Replace damaged siding panels, north elevation | 4200\nReplace house wrap behind north panels | 650\nCaulk and seal north elevation joints | 380\nPaint trim, north elevation | 850";
-  document.getElementById('run').click();
-  // Apply the sample story's evidence marks after the rule-based run:
-  currentRows.forEach(r=>{
-    if(/siding|caulk/i.test(r.description)){ r.evidence='confirms'; r.verdict='Done'; }
   });
   render();
 });
