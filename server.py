@@ -33,11 +33,23 @@ Endpoints:
     POST /api/claims/<id>/evidence -> update evidence, recompute verdicts
     GET  /api/report/<id>      -> Markdown report download
     GET  /api/uploads/<file>   -> stored photo (path-traversal guarded)
+    POST /api/claims/<id>/upload-link -> create an assessor upload link
+    GET  /upload/<token>       -> assessor photo-upload page (no login;
+                                  the unguessable token IS the access)
+    POST /api/upload/<token>  -> assessor uploads before/after photos
+    POST /api/claims/<id>/upload-link/revoke -> revoke its upload links
+
+    Security note: an upload link is a bearer token. Anyone with the link
+    can attach photos to that claim (photos only — no verdict, scope, or
+    estimate changes). Share it only with the assessor, and revoke it
+    when the photos are in.
 """
 import base64
+import html
 import json
 import os
 import re
+import secrets
 import sqlite3
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -133,6 +145,10 @@ def db():
         rows TEXT, totals TEXT, model_notes TEXT,
         before_path TEXT, after_path TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS upload_links (
+        token TEXT PRIMARY KEY, claim_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP, revoked INTEGER DEFAULT 0
+    )""")
     conn.commit()
     # One-time import from the old claims.json, if present and DB is empty.
     if conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0] == 0 and os.path.exists(LEGACY_JSON):
@@ -209,6 +225,83 @@ def save_upload(claim_id, kind, data_url):
     return filename
 
 
+def create_upload_link(claim_id):
+    token = secrets.token_urlsafe(24)
+    conn = db()
+    conn.execute("INSERT INTO upload_links (token, claim_id) VALUES (?, ?)",
+                 (token, claim_id))
+    conn.commit()
+    conn.close()
+    return token
+
+
+def get_upload_link(token):
+    conn = db()
+    row = conn.execute(
+        "SELECT token, claim_id, created_at, revoked FROM upload_links "
+        "WHERE token = ?", (token,)).fetchone()
+    conn.close()
+    if not row or row[3]:
+        return None
+    return {"token": row[0], "claim_id": row[1], "created_at": row[2]}
+
+
+def revoke_upload_links(claim_id):
+    conn = db()
+    conn.execute("UPDATE upload_links SET revoked = 1 WHERE claim_id = ?",
+                 (claim_id,))
+    conn.commit()
+    conn.close()
+
+
+def upload_page(claim):
+    """Assessor upload page: photos only, no login, token-gated."""
+    cid = html.escape(claim["id"])
+    rows = "".join(
+        f"<li>{html.escape(r['description'])} — ${r['amount']:,.0f} — "
+        f"<strong>{html.escape(r['verdict'])}</strong></li>"
+        for r in claim["rows"])
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClaimProof — assessor photo upload</title>
+<style>body{{font-family:system-ui,sans-serif;max-width:640px;margin:0 auto;
+padding:16px;color:#1a2332}} button{{padding:12px 18px;min-height:44px;
+font-size:16px;background:#4a6cf7;color:#fff;border:0;border-radius:10px;
+cursor:pointer;width:100%}} img{{max-width:100%;border-radius:8px}}
+.bar{{height:6px;border-radius:3px;background:linear-gradient(90deg,#4a6cf7 0 33%,#e8332a 33% 66%,#f2c94c 66% 100%)}}</style>
+</head><body><div class="bar"></div>
+<h1>ClaimProof — assessor photo upload</h1>
+<p>Claim <code>{cid}</code>. Upload before/after photos for this claim.
+Photos are attached to the claim only — you cannot change the scope,
+estimate, or verdicts from this page.</p>
+<ul>{rows}</ul>
+<p><label>Before photo <input type="file" id="before" accept="image/*"></label></p>
+<p><img id="beforeImg" alt=""></p>
+<p><label>After photo <input type="file" id="after" accept="image/*"></label></p>
+<p><img id="afterImg" alt=""></p>
+<p><button id="send">Upload photos</button></p>
+<p id="status"></p>
+<script>
+const token = location.pathname.split('/').pop();
+function read(input, img, key){{ input.addEventListener('change', ()=>{{
+  const f = input.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ()=>{{ img.src = r.result; window[key] = r.result; }};
+  r.readAsDataURL(f); }}); }}
+read(document.getElementById('before'), document.getElementById('beforeImg'), '_b');
+read(document.getElementById('after'), document.getElementById('afterImg'), '_a');
+document.getElementById('send').addEventListener('click', async ()=>{{
+  const res = await fetch('/api/upload/' + token, {{method:'POST',
+    headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{before: window._b || null, after: window._a || null}})}});
+  const data = await res.json();
+  document.getElementById('status').textContent = res.ok
+    ? 'Photos uploaded. Before: ' + !!data.has_before + ', After: ' + !!data.has_after
+    : ('Upload failed: ' + (data.error || res.status));
+}});
+</script></body></html>"""
+
+
 def report_md(claim):
     lines = ["# ClaimProof report", "", f"Claim ID: `{claim['id']}`",
              f"Mode: {claim['mode']} (local = rule-based, no model verdicts)",
@@ -282,6 +375,13 @@ class Handler(BaseHTTPRequestHandler):
                      "gif": "image/gif"}.get(ext, "application/octet-stream")
             with open(full, "rb") as f:
                 self._send(200, f.read(), ctype)
+        elif path.startswith("/upload/"):
+            link = get_upload_link(path.rsplit("/", 1)[-1])
+            claim = get_claim(link["claim_id"]) if link else None
+            if not claim:
+                self._send(404, "Link not found or revoked.", "text/plain")
+            else:
+                self._send(200, upload_page(claim), "text/html")
         elif path.startswith("/api/claims/"):
             claim = get_claim(path.rsplit("/", 1)[-1])
             if not claim:
@@ -345,6 +445,36 @@ class Handler(BaseHTTPRequestHandler):
                 t["verified_lines"] = sum(1 for x in claim["rows"] if x["verdict"] == "Done")
             save_claim(claim)
             self._send(200, json.dumps(claim))
+        elif path.startswith("/api/claims/") and path.endswith("/upload-link"):
+            claim_id = path.split("/")[3]
+            if not get_claim(claim_id):
+                self._send(404, json.dumps({"error": "claim not found"}))
+                return
+            token = create_upload_link(claim_id)
+            self._send(200, json.dumps({"claim_id": claim_id, "token": token,
+                                        "upload_path": f"/upload/{token}"}))
+        elif path.startswith("/api/claims/") and path.endswith("/upload-link/revoke"):
+            claim_id = path.split("/")[3]
+            revoke_upload_links(claim_id)
+            self._send(200, json.dumps({"claim_id": claim_id, "revoked": True}))
+        elif path.startswith("/api/upload/"):
+            link = get_upload_link(path.rsplit("/", 1)[-1])
+            if not link:
+                self._send(404, json.dumps({"error": "link not found or revoked"}))
+                return
+            claim = get_claim(link["claim_id"])
+            if not claim:
+                self._send(404, json.dumps({"error": "claim not found"}))
+                return
+            body = self._json()
+            before_path = save_upload(claim["id"], "before", body.get("before"))
+            after_path = save_upload(claim["id"], "after", body.get("after"))
+            if before_path:
+                claim["before_path"], claim["before_url"] = before_path, f"/api/uploads/{before_path}"
+            if after_path:
+                claim["after_path"], claim["after_url"] = after_path, f"/api/uploads/{after_path}"
+            save_claim(claim)
+            self._send(200, json.dumps(get_claim(claim["id"])))
         elif path.startswith("/api/claims/") and path.endswith("/evidence"):
             claim_id = path.split("/")[3]
             claim = get_claim(claim_id)
