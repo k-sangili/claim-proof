@@ -84,6 +84,32 @@ Paint trim, north elevation | 850</textarea></div>
 <div id="results"><p><em>Click “Run verification” to see line-item verdicts.</em></p></div>
 <div class="totals" id="totals" style="display:none"></div>
 
+<h2>4. Assessor photo upload</h2>
+<p>Run a verification first, then create a link the assessor can open to upload before/after photos for that claim — no login, the link itself is the access. Share it only with the assessor, and revoke it once the photos are in. The assessor can attach photos only; they cannot change scope, estimate, or verdicts.</p>
+<p><button class="secondary" id="createLink">Create assessor upload link</button>
+<button class="secondary" id="revokeLink">Revoke upload links</button></p>
+<p id="linkOut"></p>
+<script>
+document.getElementById('createLink').addEventListener('click', async ()=>{
+  const out = document.getElementById('linkOut');
+  if (!currentClaimId) { out.textContent = 'Run a verification first so there is a saved claim to link to.'; return; }
+  try {
+    const res = await fetch(`/api/claims/${currentClaimId}/upload-link`, {method:'POST'});
+    const data = await res.json();
+    if (!res.ok) { out.textContent = 'Could not create link: ' + (data.error || res.status); return; }
+    const url = location.origin + data.upload_path;
+    out.innerHTML = `Assessor upload link: <a href="${url}">${url}</a> <button class="secondary" id="copyLink">Copy link</button>`;
+    document.getElementById('copyLink').addEventListener('click', ()=>navigator.clipboard.writeText(url));
+  } catch(e) { out.textContent = 'Could not create link — is the server running? (This needs the Python backend, not the static page.)'; }
+});
+document.getElementById('revokeLink').addEventListener('click', async ()=>{
+  const out = document.getElementById('linkOut');
+  if (!currentClaimId) { out.textContent = 'Run a verification first.'; return; }
+  await fetch(`/api/claims/${currentClaimId}/upload-link/revoke`, {method:'POST'});
+  out.textContent = 'Upload links for this claim revoked.';
+});
+</script>
+
 <h2>How the models fit (planned live path)</h2>
 <ul>
   <li><strong>Muse Spark (muse-spark-1.3):</strong> parse scope + estimate into line items, match estimate lines to scope lines, draft the report.</li>
