@@ -38,6 +38,14 @@ Endpoints:
                                   the unguessable token IS the access)
     POST /api/upload/<token>  -> assessor uploads before/after photos
     POST /api/claims/<id>/upload-link/revoke -> revoke its upload links
+    POST /api/parse-doc -> JSON {filename, data_url, kind: "scope"|"estimate"}
+                           -> parsed line items for the scope/estimate rows.
+                           With MODEL_API_KEY, Muse Spark parses the
+                           document; without a key, a rule-based parser
+                           reads amount-bearing lines. PDF (.pdf), Word
+                           (.docx), and plain text (.txt/.csv/.md) are
+                           supported; scanned image-only PDFs have no text
+                           layer and cannot be parsed this way.
 
     Security note: an upload link is a bearer token. Anyone with the link
     can attach photos to that claim (photos only — no verdict, scope, or
@@ -46,12 +54,15 @@ Endpoints:
 """
 import base64
 import html
+import io
 import json
 import os
 import re
 import secrets
 import sqlite3
 import uuid
+import zipfile
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 
@@ -81,6 +92,117 @@ def parse_lines(text):
             amount = float(m.group(0).replace(",", "")) if m else 0.0
         items.append({"description": parts[0], "amount": amount})
     return items
+
+
+def _pdf_unescape(s):
+    return (s.replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
+             .replace("\\n", " ").replace("\\r", " "))
+
+
+def extract_pdf_text(data):
+    """Minimal stdlib PDF text extraction (text-layer PDFs only).
+
+    Decompresses FlateDecode streams and pulls Tj/TJ string operands.
+    Scanned image-only PDFs have no text operators and return "".
+    """
+    chunks = []
+    for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.S):
+        raw = m.group(1)
+        try:
+            raw = zlib.decompress(raw)
+        except Exception:
+            pass
+        text = raw.decode("latin-1", errors="replace")
+        for tj in re.findall(r"\((?:[^()\\]|\\.)*\)\s*Tj", text):
+            chunks.append(_pdf_unescape(tj[1:tj.rfind(")")]) + "\n")
+        for tj in re.findall(r"\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*TJ", text):
+            parts = re.findall(r"\((?:[^()\\]|\\.)*\)", tj)
+            chunks.append("".join(_pdf_unescape(p[1:-1]) for p in parts) + "\n")
+    return "".join(chunks)
+
+
+def extract_document_text(filename, data):
+    """Extract readable text from a .pdf, .docx, or plain-text upload."""
+    name = (filename or "").lower()
+    if name.endswith(".pdf"):
+        return extract_pdf_text(data)
+    if name.endswith(".docx"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+        except Exception as e:
+            raise ValueError(f"could not read .docx: {e}")
+        lines = []
+        for para in xml.split("</w:p>"):
+            texts = re.findall(r"<w:t[^>]*>(.*?)</w:t>", para, re.S)
+            if texts:
+                lines.append(" ".join(texts))
+        return "\n".join(lines)
+    if name.endswith((".txt", ".csv", ".md")):
+        return data.decode("utf-8", errors="replace")
+    raise ValueError("unsupported file type — upload a .pdf, .docx, .txt, or .csv")
+
+
+_SKIP_LINE = re.compile(
+    r"total|subtotal|grand total|rcv|replacement cost|deductible|depreciation|"
+    r"recoverable|non-?recoverable|sales tax|amount due|net claim|amount paid|"
+    r"policy|claim number|date of loss|insured|adjuster|page \d+ of", re.I)
+_AMOUNT = re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})|\$?\d+(?:\.\d{2})")
+
+
+def parse_items_from_text(text):
+    """Rule-based fallback: amount-bearing lines -> line items.
+
+    Takes the last amount on a line (the amount column), drops summary
+    lines, dedupes descriptions. Used when no model key is set, or when
+    the model parse fails; the result is always labelled by mode.
+    """
+    items, seen = [], set()
+    for raw in (text or "").splitlines():
+        amounts = _AMOUNT.findall(raw)
+        if not amounts:
+            continue
+        try:
+            amount = float(amounts[-1].replace("$", "").replace(",", ""))
+        except ValueError:
+            continue
+        if amount <= 0:
+            continue
+        desc = _AMOUNT.sub("", raw)
+        desc = re.sub(r"^[\d\.\-\s]+", "", desc)
+        desc = re.sub(r"[^A-Za-z0-9 ,\-/&()]+", " ", desc)
+        desc = re.sub(r"\s+", " ", desc).strip(" -")
+        if len(desc) < 4 or _SKIP_LINE.search(desc):
+            continue
+        key = desc.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({"description": desc, "amount": amount})
+        if len(items) >= 200:
+            break
+    return items
+
+
+def parse_document(filename, data, kind):
+    """Parse an uploaded assessor document into scope/estimate items.
+
+    Returns (items, mode, note). AI (Spark) when a key is set, rule
+    parser otherwise or on model error — never a silent fake.
+    """
+    text = extract_document_text(filename, data)
+    if len(text.strip()) < 50:
+        raise ValueError(
+            "no readable text found in this file — it may be a scanned "
+            "image-only PDF. Use a text-based PDF/DOCX, or enter items manually.")
+    if meta_api.has_key():
+        res = meta_api.spark_parse_document(text, kind)
+        if res.get("items"):
+            return res["items"], "live", "Parsed by Muse Spark — review the rows before running verification."
+        note = f"AI parse failed ({res.get('error', 'no items')}); fell back to the rule parser."
+        return parse_items_from_text(text), "local", note
+    return (parse_items_from_text(text), "local",
+            "No model key set — parsed with the rule parser. Set MODEL_API_KEY for AI parsing.")
 
 
 def tokens(s):
@@ -445,6 +567,22 @@ class Handler(BaseHTTPRequestHandler):
                 t["verified_lines"] = sum(1 for x in claim["rows"] if x["verdict"] == "Done")
             save_claim(claim)
             self._send(200, json.dumps(claim))
+        elif path == "/api/parse-doc":
+            body = self._json()
+            data_url = body.get("data_url", "")
+            try:
+                b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
+                data = base64.b64decode(b64)
+                items, mode, note = parse_document(
+                    body.get("filename", ""),
+                    data,
+                    "insurer approved scope" if body.get("kind") == "scope"
+                    else "contractor estimate")
+            except Exception as e:
+                self._send(400, json.dumps({"error": str(e)}))
+                return
+            self._send(200, json.dumps({"items": items, "mode": mode, "note": note,
+                                        "filename": body.get("filename", "")}))
         elif path.startswith("/api/claims/") and path.endswith("/upload-link"):
             claim_id = path.split("/")[3]
             if not get_claim(claim_id):
