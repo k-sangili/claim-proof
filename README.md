@@ -1,10 +1,8 @@
 # ClaimProof
 
-![Quanta Insights logo](quanta-insights-logo.jpg)
-
 **Remote repair verification for landlords — built for the Meta Global AI Developer Hackathon (Cerebral Valley), Oct 26 – Nov 4, 2026.**
 
-**UI theme:** Quanta Insights logo colors, sampled from the logo above (JPEG, so hexes are approximations): blue #4a6cf7, red #e8332a, yellow #f2c94c, dark gray #3d3d3d, with a blue/red/yellow accent bar. The UI is responsive (single column under 700px, scrollable verdict table, 44px tap targets).
+**UI theme:** blue #4a6cf7, red #e8332a, yellow #f2c94c, dark gray #3d3d3d, with a blue/red/yellow accent bar. The UI is responsive (single column under 700px, scrollable verdict table, 44px tap targets).
 
 - **Track:** Indie developer (solo)
 - **Theme:** Build for Your World
