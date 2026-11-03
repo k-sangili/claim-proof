@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClaimProof — MVP</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:980px;margin:0 auto;padding:24px;color:#111}
+  h1{margin-bottom:4px} .sub{color:#555;margin-top:0}
+  .banner{background:#fff3cd;border:1px solid #e6c87a;padding:10px 12px;border-radius:8px}
+  textarea{width:100%;min-height:130px;font:14px/1.5 monospace;padding:10px;box-sizing:border-box}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  button{padding:10px 16px;font-size:15px;cursor:pointer;border-radius:8px;border:1px solid #111;background:#111;color:#fff}
+  button.secondary{background:#fff;color:#111}
+  table{width:100%;border-collapse:collapse;margin-top:16px}
+  th,td{border-bottom:1px solid #ddd;text-align:left;padding:8px;vertical-align:top}
+  .Done{color:#0a6b2d;font-weight:700} .Out{color:#a33;font-weight:700} .Not{color:#8a6d00;font-weight:700}
+  .photos{display:flex;gap:16px;flex-wrap:wrap} .photos figure{margin:0;flex:1;min-width:260px}
+  .photos img{width:100%;border:1px solid #ddd;border-radius:8px}
+  .overlay-wrap{position:relative} .overlay{position:absolute;inset:0;background:rgba(0,180,120,.22);border:2px dashed #0a6b2d;border-radius:8px;display:none;align-items:center;justify-content:center;font-weight:700;color:#064}
+  .overlay.on{display:flex}
+  .totals{background:#f2f2f2;padding:12px;border-radius:8px;margin-top:16px}
+  code{background:#eee;padding:1px 5px;border-radius:4px}
+  @media(max-width:700px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>ClaimProof — MVP v0</h1>
+<p class="sub">Remote repair verification: approved scope + contractor estimate + before/after photos → Done / Not Evidenced / Out of Scope, per line item.</p>
+<div class="banner" id="modeBanner"><strong>Working app.</strong> Run <code>python3 server.py</code> and this page talks to the backend: claims are saved, reports export, and — with <code>MODEL_API_KEY</code> set — Muse Spark / SAM 3.1 / Muse Wonder run live. Without a key it runs in local mode (rule-based + human photo review) and says so. Sample data below is <strong>synthetic</strong>, not a real claim.</div>
+
+<h2>1. Inputs</h2>
+<div class="grid">
+  <div><label><strong>Insurer approved scope</strong> — one item per line, <code>Description | $amount</code></label>
+  <textarea id="scope">Replace damaged siding panels, north elevation | 4200
+Replace house wrap behind north panels | 650
+Caulk and seal north elevation joints | 380</textarea></div>
+  <div><label><strong>Contractor estimate</strong> — one item per line, <code>Description | $amount</code></label>
+  <textarea id="estimate">Replace damaged siding panels, north elevation | 4200
+Replace house wrap behind north panels | 650
+Caulk and seal north elevation joints | 380
+Paint trim, north elevation | 850</textarea></div>
+</div>
+<p>
+  <button id="run">Run verification</button>
+  <button class="secondary" id="sample">Load sample claim</button>
+</p>
+
+<h2>2. Before / after photos</h2>
+<p>Upload your own photos, or use the sample flow without photos — photo review is a separate step below, not an automatic pass.</p>
+<div class="photos">
+  <figure><label>Before<br><input type="file" id="beforeFile" accept="image/*"></label><div><img id="beforeImg" alt="Before photo preview"></div></figure>
+  <figure><label>After<br><input type="file" id="afterFile" accept="image/*"></label>
+    <div class="overlay-wrap"><img id="afterImg" alt="After photo preview"><div class="overlay" id="samOverlay">DEMO SAM OVERLAY — work area</div></div>
+    <label><input type="checkbox" id="samToggle"> Show demo SAM overlay (placeholder, not real segmentation)</label>
+  </figure>
+</div>
+
+<h2>3. Verdicts</h2>
+<div id="results"><p><em>Click “Run verification” to see line-item verdicts.</em></p></div>
+<div class="totals" id="totals" style="display:none"></div>
+
+<h2>How the models fit (planned live path)</h2>
+<ul>
+  <li><strong>Muse Spark (muse-spark-1.3):</strong> parse scope + estimate into line items, match estimate lines to scope lines, draft the report.</li>
+  <li><strong>SAM 3.1 (sam-3.1):</strong> segment the work area (e.g. “siding panels”, “trim”) in before/after photos.</li>
+  <li><strong>Muse Wonder (muse-wonder-1.0):</strong> judge, from the photo pair + SAM masks, whether the work visibly happened — lighting/angle changes are why a pixel diff alone is not trusted.</li>
+  <li><strong>Muse Image:</strong> deliberately <em>not</em> used — ClaimProof never generates evidence photos.</li>
+</ul>
+<p><small>Verdict rule in this MVP: no scope match → Out of Scope. Scope match + photo evidence marked “Confirms” → Done. Scope match + no confirming evidence → Not Evidenced. Low-confidence items stay flagged for a human, never auto-approved.</small></p>
+
+<script>
+// ---- Meta Model API adapters (live path, stubbed until a key is set) ----
+// Set window.CLAIMPROOF_API_KEY before loading to enable live calls.
+// Endpoints / request shapes must be confirmed against Meta's current Model API docs
+// before shipping — these stubs intentionally do NOT fake a live response.
+const MODELS = { spark: 'muse-spark-1.3', sam: 'sam-3.1', wonder: 'muse-wonder-1.0' };
+async function callSpark(prompt){ if(!window.CLAIMPROOF_API_KEY) return {mode:'demo', note:'No API key set — rule-based engine used instead.'}; throw new Error('Live Spark call not wired to a verified endpoint yet.'); }
+async function callSAM(image, prompt){ if(!window.CLAIMPROOF_API_KEY) return {mode:'demo', note:'No API key set — demo overlay used instead.'}; throw new Error('Live SAM call not wired to a verified endpoint yet.'); }
+async function callWonder(beforeImg, afterImg, mask){ if(!window.CLAIMPROOF_API_KEY) return {mode:'demo', note:'No API key set — human photo review used instead.'}; throw new Error('Live Wonder call not wired to a verified endpoint yet.'); }
+
+// ---- MVP verdict engine (transparent, rule-based) ----
+function parseLines(text){
+  return text.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{
+    const parts = line.split('|').map(s=>s.trim());
+    const amount = parseFloat((parts[1]||'').replace(/[^0-9.]/g,'')) || 0;
+    return { description: parts[0], amount };
+  });
+}
+function tokens(s){ return s.toLowerCase().replace(/[^a-z0-9 ]/g,'').split(/\s+/).filter(w=>w.length>2 && !['and','the','north','south','east','west'].includes(w)); }
+function overlap(a,b){ const A=new Set(tokens(a)), B=new Set(tokens(b)); let n=0; A.forEach(w=>{if(B.has(w)) n++}); return n / Math.max(1, Math.max(A.size, B.size)); }
+function money(n){ return '$' + n.toLocaleString('en-US'); }
+
+let currentRows = [];
+let currentClaimId = null;
+fetch('/api/health').then(r=>r.json()).then(h=>{
+  document.getElementById('modeBanner').innerHTML = h.live_models
+    ? '<strong>Live mode.</strong> Backend connected with a Meta Model API key — Spark / SAM / Wonder calls are live.'
+    : '<strong>Local mode.</strong> Backend connected, no API key set — rule-based verdicts + human photo review. Set MODEL_API_KEY for live models.';
+}).catch(()=>{ /* opened as a plain file: browser-local engine below still works */ });
+function render(){
+  const wrap = document.getElementById('results');
+  if(!currentRows.length){ wrap.innerHTML = '<p><em>No line items.</em></p>'; return; }
+  let html = '<table><tr><th>Estimate line</th><th>Billed</th><th>Scope match</th><th>Photo evidence</th><th>Verdict</th></tr>';
+  currentRows.forEach((r,i)=>{
+    const cls = r.verdict==='Done' ? 'Done' : r.verdict==='Out of Scope' ? 'Out' : 'Not';
+    html += `<tr><td>${r.description}</td><td>${money(r.amount)}</td><td>${r.match || '— none —'}</td>
+      <td><select data-i="${i}">
+        <option value="none" ${r.evidence==='none'?'selected':''}>Not reviewed</option>
+        <option value="confirms" ${r.evidence==='confirms'?'selected':''}>Confirms work</option>
+        <option value="contradicts" ${r.evidence==='contradicts'?'selected':''}>Contradicts / no change</option>
+      </select></td><td class="${cls}">${r.verdict}</td></tr>`;
+  });
+  html += '</table><p><small>Change a photo-evidence dropdown and verdicts update. “Confirms” only moves a scope-matched line to Done.</small></p>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('select').forEach(sel=>sel.addEventListener('change', e=>{
+    const r = currentRows[+e.target.dataset.i]; r.evidence = e.target.value;
+    r.verdict = r.match ? (r.evidence==='confirms' ? 'Done' : 'Not Evidenced') : 'Out of Scope';
+    renderTotals(); render();
+  }));
+  renderTotals();
+}
+function renderTotals(){
+  const el = document.getElementById('totals'); el.style.display='block';
+  const billed = currentRows.reduce((s,r)=>s+r.amount,0);
+  const verified = currentRows.filter(r=>r.verdict==='Done').reduce((s,r)=>s+r.amount,0);
+  const flagged = currentRows.filter(r=>r.verdict!=='Done').reduce((s,r)=>s+r.amount,0);
+  el.innerHTML = `<strong>Totals:</strong> Billed ${money(billed)} &nbsp;·&nbsp; Verified (Done) ${money(verified)} &nbsp;·&nbsp; Flagged for review ${money(flagged)} &nbsp;·&nbsp; ${currentRows.filter(r=>r.verdict==='Done').length}/${currentRows.length} lines verified`;
+}
+document.getElementById('run').addEventListener('click', async ()=>{
+  const scopeText = document.getElementById('scope').value;
+  const estimateText = document.getElementById('estimate').value;
+  // Prefer the backend (saved claim + live models when a key is set).
+  try {
+    const res = await fetch('/api/verify', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({scope: scopeText, estimate: estimateText,
+        before: document.getElementById('beforeImg').src || null,
+        after: document.getElementById('afterImg').src || null})});
+    if (res.ok) {
+      const claim = await res.json();
+      currentClaimId = claim.id; currentRows = claim.rows;
+      render();
+      if (claim.model_notes && claim.model_notes.length)
+        document.getElementById('totals').innerHTML += '<br><small>Model notes: ' + claim.model_notes.join(' · ') + '</small>';
+      document.getElementById('totals').innerHTML += `<br><small>Saved claim <code>${claim.id}</code> · <a href="/api/report/${claim.id}">Download Markdown report</a></small>`;
+      return;
+    }
+  } catch(e) { /* no backend: fall through to the browser-local engine */ }
+  currentClaimId = null;
+  const scope = parseLines(scopeText);
+  const estimate = parseLines(estimateText);
+  currentRows = estimate.map(e=>{
+    let best=null, bestScore=0;
+    scope.forEach(s=>{ const sc=overlap(e.description, s.description); if(sc>bestScore){bestScore=sc; best=s;} });
+    const match = bestScore >= 0.4 ? best.description : null;
+    return { description:e.description, amount:e.amount, match, evidence:'none', verdict: match ? 'Not Evidenced' : 'Out of Scope' };
+  });
+  render();
+});
+document.getElementById('sample').addEventListener('click', ()=>{
+  // Synthetic demo: siding + caulk confirmed in the sample story, house wrap not evidenced, trim out of scope.
+  document.getElementById('scope').value = "Replace damaged siding panels, north elevation | 4200\nReplace house wrap behind north panels | 650\nCaulk and seal north elevation joints | 380";
+  document.getElementById('estimate').value = "Replace damaged siding panels, north elevation | 4200\nReplace house wrap behind north panels | 650\nCaulk and seal north elevation joints | 380\nPaint trim, north elevation | 850";
+  document.getElementById('run').click();
+  // Apply the sample story's evidence marks after the rule-based run:
+  currentRows.forEach(r=>{
+    if(/siding|caulk/i.test(r.description)){ r.evidence='confirms'; r.verdict='Done'; }
+  });
+  render();
+});
+function preview(input, img){ input.addEventListener('change', ()=>{ const f=input.files[0]; if(f) img.src = URL.createObjectURL(f); }); }
+preview(document.getElementById('beforeFile'), document.getElementById('beforeImg'));
+preview(document.getElementById('afterFile'), document.getElementById('afterImg'));
+document.getElementById('samToggle').addEventListener('change', e=>document.getElementById('samOverlay').classList.toggle('on', e.target.checked));
+</script>
+</body>
+</html>
