@@ -90,6 +90,46 @@ def spark_parse(scope_text, estimate_text):
         return {"mode": "live", "error": f"Spark JSON parse failed: {e}"}
 
 
+def spark_parse_document(text, kind):
+    """Ask Spark to parse one uploaded document into JSON line items.
+
+    kind is "insurer approved scope" or "contractor estimate".
+    Returns {"mode": "live", "items": [...]} or an error dict; the caller
+    falls back to the rule-based parser only on a *reported* error.
+    """
+    prompt = (
+        "Parse the document below into JSON only, no prose: "
+        "{\"items\": [{\"description\": str, \"amount\": number}]}. "
+        f"The document is a {kind}. Include only actual repair work line "
+        "items. Exclude summary lines: totals, subtotals, RCV, deductible, "
+        "depreciation, taxes, fees, and amounts due. Keep descriptions "
+        "short and literal, exactly as written; amounts are USD, 0 if absent.\n\n"
+        f"DOCUMENT:\n{text[:12000]}"
+    )
+    res = _post("/chat/completions", {
+        "model": MODELS["spark"],
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+    })
+    if res.get("error"):
+        return res
+    text_out = _chat_text(res["data"])
+    m = re.search(r"\{.*\}", text_out, re.S)
+    if not m:
+        return {"mode": "live", "error": "Spark returned no JSON object"}
+    try:
+        parsed = json.loads(m.group(0))
+        items = parsed.get("items", [])
+        if not isinstance(items, list):
+            return {"mode": "live", "error": "Spark JSON had no items list"}
+        return {"mode": "live", "items": [
+            {"description": str(i.get("description", "")).strip(),
+             "amount": float(i.get("amount") or 0)}
+            for i in items if str(i.get("description", "")).strip()]}
+    except Exception as e:
+        return {"mode": "live", "error": f"Spark JSON parse failed: {e}"}
+
+
 def wonder_judge(before_data_url, after_data_url, line_description):
     """Ask Wonder (multimodal) whether the work visibly happened.
 
