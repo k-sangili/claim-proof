@@ -134,15 +134,15 @@ document.getElementById('run').addEventListener('click', async ()=>{
   try {
     const res = await fetch('/api/verify', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({scope: scopeText, estimate: estimateText,
-        before: document.getElementById('beforeImg').src || null,
-        after: document.getElementById('afterImg').src || null})});
+        before: window._beforeData || null,
+        after: window._afterData || null})});
     if (res.ok) {
       const claim = await res.json();
       currentClaimId = claim.id; currentRows = claim.rows;
       render();
       if (claim.model_notes && claim.model_notes.length)
         document.getElementById('totals').innerHTML += '<br><small>Model notes: ' + claim.model_notes.join(' · ') + '</small>';
-      document.getElementById('totals').innerHTML += `<br><small>Saved claim <code>${claim.id}</code> · <a href="/api/report/${claim.id}">Download Markdown report</a></small>`;
+      document.getElementById('totals').innerHTML += `<br><small>Saved claim <code>${claim.id}</code> · <a href="/api/report/${claim.id}">Download Markdown report</a>${claim.before_url ? ` · <a href="${claim.before_url}">Before photo (stored)</a>` : ''}${claim.after_url ? ` · <a href="${claim.after_url}">After photo (stored)</a>` : ''}</small>`;
       return;
     }
   } catch(e) { /* no backend: fall through to the browser-local engine */ }
@@ -168,9 +168,12 @@ document.getElementById('sample').addEventListener('click', ()=>{
   });
   render();
 });
-function preview(input, img){ input.addEventListener('change', ()=>{ const f=input.files[0]; if(f) img.src = URL.createObjectURL(f); }); }
-preview(document.getElementById('beforeFile'), document.getElementById('beforeImg'));
-preview(document.getElementById('afterFile'), document.getElementById('afterImg'));
+function preview(input, img, key){ input.addEventListener('change', ()=>{ const f=input.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{ img.src = reader.result; window[key] = reader.result; };
+  reader.readAsDataURL(f); }); }
+preview(document.getElementById('beforeFile'), document.getElementById('beforeImg'), '_beforeData');
+preview(document.getElementById('afterFile'), document.getElementById('afterImg'), '_afterData');
 document.getElementById('samToggle').addEventListener('change', e=>document.getElementById('samOverlay').classList.toggle('on', e.target.checked));
 </script>
 </body>
