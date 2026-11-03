@@ -9,8 +9,6 @@
 - **One line:** Upload an insurer's approved scope, a contractor's estimate, and before/after photos, and get a per-line verdict — Done / Not Evidenced / Out of Scope — with the evidence attached to each call and totals you can send to a manager or contractor.
 - **Status:** Working application. All code in this repo was written Nov 3, 2026, during the hackathon window. No pre-existing codebase was reused; the problem story (a remote landlord's repair claim) predates the build, the code does not.
 
-> **Demo video:** _to be recorded before submission — 90-second walkthrough, link added here and on the Cerebral Valley submission form._
->
 > **Submission deadline:** Wed Nov 4, 2026, 9:00 PM ET / 6:00 PM PT, via the Cerebral Valley portal. The $150 Meta Model API credit claim closes at the same time.
 
 ## The problem, firsthand
@@ -19,29 +17,17 @@ A landlord in one state, a rental in another, and a repair stuck in a three-way 
 
 **Who benefits:** remote landlords, property managers, and contractors who want a shared, checkable record instead of another round of "did you do this?" emails. A manager can verify work without a site visit; a contractor gets paid faster on the lines that are actually evidenced.
 
-## Demo (90 seconds)
+## How to use
 
-1. **The stuck loop:** approved scope vs. estimate vs. photos, three sources disagreeing.
-2. **Run the sample claim:** siding panels → Done, caulk/seal → Done, house wrap → Not Evidenced (billed, not visually confirmed), trim paint → Out of Scope (not in the approved scope).
-3. **Totals + honesty line:** $6,080 billed, $4,580 verified, $1,500 flagged. Low-confidence items stay flagged for a human — never auto-approved.
-
-Try it with the sample data first, then with your own scope/estimate text. All sample data in this repo is **synthetic**. Do not put real claim numbers, policy documents, or unredacted photos into a public submission or demo.
+1. **Enter your claim:** paste your insurer's approved scope and your contractor's estimate, one item per line as `Description | $amount`.
+2. **Add photos:** upload before/after photos for the work.
+3. **Run verification:** each estimate line gets Done, Not Evidenced, or Out of Scope, with totals for billed / verified / flagged amounts.
+4. **Review and export:** change a photo-evidence dropdown to update a verdict, download the Markdown report, or send an assessor upload link for more photos.
+5. **Honesty line:** low-confidence items stay flagged for a human — never auto-approved.
 
 ## Assessor photo upload (via a link)
 
 After running a verification, click **Create assessor upload link** in section 4. Send that link to the assessor: they open it (no login) and upload before/after photos for that claim. The link is a bearer token — anyone with it can attach photos, so share it only with the assessor and click **Revoke upload links** once the photos are in. The assessor can attach photos only; they cannot change scope, estimate, or verdicts. (This needs the Python backend; the static page alone cannot host upload links.)
-
-## Screenshots
-
-Captured Nov 3, 2026 from the running local app (sample claim: siding and caulk Done, house wrap Not Evidenced, trim paint Out of Scope — $6,080 billed / $4,580 verified / $1,500 flagged):
-
-Desktop:
-
-![ClaimProof desktop screenshot](screenshots/desktop.png)
-
-Mobile (390px):
-
-![ClaimProof mobile screenshot](screenshots/mobile.png)
 
 ## How to run
 
@@ -119,12 +105,12 @@ The cost-smart split matters on a $150 credit budget: Wonder runs only on the ph
 
 ## Technical depth
 
-- **Zero-dependency backend:** Python standard library only (`server.py`), so the app runs anywhere Python does with no install step to break during a demo.
+- **Zero-dependency backend:** Python standard library only (`server.py`), so the app runs anywhere Python does with no install step.
 - **Deterministic fallback:** the local parser/matcher is rule-based and auditable — same input, same verdict, with a match score shown per line.
 - **Human-in-the-loop by design:** photo evidence is a separate, explicit step. "Confirms" is the only path from Not Evidenced to Done in local mode.
 - **Real persistence:** claims save to SQLite, photos save as files in `uploads/`, evidence updates recompute verdicts and totals, reports export as Markdown.
 - **No silent failures:** missing key, API error, and empty SAM match are three different states, and the UI/backend distinguish all three.
-- **Tested:** backend verified end-to-end Nov 3, 2026 — sample claim returns $6,080 billed / $4,580 verified / $1,500 flagged, 2/4 lines verified, and a correct Markdown report.
+- **Tested:** backend verified end-to-end Nov 3, 2026 — verification, saved claims, evidence updates, photo storage, and Markdown report export all checked.
 
 ## Project structure
 
@@ -132,7 +118,6 @@ The cost-smart split matters on a $150 credit budget: Wonder runs only on the ph
 index.html        # UI: inputs, photo upload/preview, verdict table, report link
 server.py         # Working backend: verify, claims, evidence, report, health
 meta_api.py       # Meta Model API client: Spark, SAM 3.1, Wonder (key from env)
-sample-data.json  # Synthetic sample claim + expected verdicts/totals
 .env.example      # Environment variables (no secrets)
 ```
 
@@ -145,7 +130,7 @@ sample-data.json  # Synthetic sample claim + expected verdicts/totals
 
 ## Roadmap (future only — not shipped)
 
-1. Live-key verification run + demo video with live SAM overlays
+1. Live-key verification run with live SAM overlays
 2. PDF scope/estimate upload parsing
 3. PDF report export + shareable report links
 4. Multiple photos per line item, date-stamped photo timeline
@@ -155,10 +140,10 @@ sample-data.json  # Synthetic sample claim + expected verdicts/totals
 
 | Criterion (official rules) | Where ClaimProof answers it |
 |---|---|
-| Impact (30%) | Real landlord/manager/contractor loop, firsthand problem, usable beyond the demo |
+| Impact (30%) | Real landlord/manager/contractor loop, firsthand problem, built as a standalone app |
 | Use of Meta AI Tooling (25%) | Spark + SAM 3.1 + Wonder, each for the job only it can do; Image deliberately excluded for integrity |
 | Technical Depth & Execution (20%) | Working backend, persistence, deterministic fallback, honest error states, tested totals |
-| Demo (25%) | Working app + 90-second video (link above when recorded); demo holds up live in local mode, live mode with a key |
+| Demo (25%) | Working standalone app, live in local mode, live mode with a key |
 
 ## License
 
