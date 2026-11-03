@@ -38,8 +38,15 @@
   .totals{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--yellow);padding:12px;border-radius:10px;margin-top:16px}
   code{background:#eef2f5;padding:1px 5px;border-radius:4px;word-break:break-all}
   input[type="file"]{max-width:100%}
+  .item-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+  .item-row input[type="text"]{flex:1;min-width:0;min-height:44px;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+  .item-row input[type="number"]{width:110px;min-height:44px;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+  .item-row .remove{width:auto;min-width:44px;padding:10px 12px;background:var(--card);color:var(--out);border-color:var(--line)}
   @media(max-width:700px){
     .grid{grid-template-columns:1fr}
+    .item-row{flex-wrap:wrap}
+    .item-row input[type="text"]{flex-basis:100%}
+    .item-row input[type="number"]{flex:1}
     .photos{flex-direction:column}
     button{width:100%}
     textarea{min-height:110px}
@@ -55,10 +62,12 @@
 
 <h2>1. Inputs</h2>
 <div class="grid">
-  <div><label><strong>Insurer approved scope</strong> — one item per line, <code>Description | $amount</code></label>
-  <textarea id="scope" placeholder="Example: Roof shingles | 5000"></textarea></div>
-  <div><label><strong>Contractor estimate</strong> — one item per line, <code>Description | $amount</code></label>
-  <textarea id="estimate" placeholder="Example: Roof shingles | 5000"></textarea></div>
+  <div><label><strong>Insurer approved scope</strong> — one box per item</label>
+  <div id="scopeItems"></div>
+  <button class="secondary" id="addScope">+ Add scope item</button></div>
+  <div><label><strong>Contractor estimate</strong> — one box per item</label>
+  <div id="estimateItems"></div>
+  <button class="secondary" id="addEstimate">+ Add estimate item</button></div>
 </div>
 <p>
   <button id="run">Run verification</button>
@@ -171,9 +180,37 @@ function renderTotals(){
   const flagged = currentRows.filter(r=>r.verdict!=='Done').reduce((s,r)=>s+r.amount,0);
   el.innerHTML = `<strong>Totals:</strong> Billed ${money(billed)} &nbsp;·&nbsp; Verified (Done) ${money(verified)} &nbsp;·&nbsp; Flagged for review ${money(flagged)} &nbsp;·&nbsp; ${currentRows.filter(r=>r.verdict==='Done').length}/${currentRows.length} lines verified`;
 }
+
+// ---- One box per item: dynamic scope / estimate rows ----
+function addItemRow(containerId, desc='', amount=''){
+  const row = document.createElement('div'); row.className = 'item-row';
+  row.innerHTML = `<input type="text" class="item-desc" placeholder="Description" value="">
+    <input type="number" class="item-amount" placeholder="$ amount" min="0" step="0.01" value="">
+    <button type="button" class="remove secondary" title="Remove item" aria-label="Remove item">×</button>`;
+  row.querySelector('.item-desc').value = desc;
+  row.querySelector('.item-amount').value = amount;
+  row.querySelector('.remove').addEventListener('click', ()=>row.remove());
+  document.getElementById(containerId).appendChild(row);
+  return row;
+}
+function collectItems(containerId){
+  return [...document.querySelectorAll(`#${containerId} .item-row`)].map(row=>{
+    const description = row.querySelector('.item-desc').value.trim();
+    const amount = parseFloat(row.querySelector('.item-amount').value) || 0;
+    return {description, amount};
+  }).filter(i=>i.description);
+}
+function itemsToText(items){ return items.map(i=>`${i.description} | ${i.amount}`).join('\n'); }
+addItemRow('scopeItems'); addItemRow('estimateItems');
+document.getElementById('addScope').addEventListener('click', ()=>addItemRow('scopeItems'));
+document.getElementById('addEstimate').addEventListener('click', ()=>addItemRow('estimateItems'));
 document.getElementById('run').addEventListener('click', async ()=>{
-  const scopeText = document.getElementById('scope').value;
-  const estimateText = document.getElementById('estimate').value;
+  const scopeText = itemsToText(collectItems('scopeItems'));
+  const estimateText = itemsToText(collectItems('estimateItems'));
+  if (!scopeText || !estimateText) {
+    document.getElementById('results').innerHTML = '<p><em>Add at least one scope item and one estimate item, then run verification.</em></p>';
+    return;
+  }
   // Prefer the backend (saved claim + live models when a key is set).
   try {
     const res = await fetch('/api/verify', {method:'POST', headers:{'Content-Type':'application/json'},
