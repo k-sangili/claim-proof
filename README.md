@@ -29,6 +29,18 @@ A landlord in one state, a rental in another, and a repair stuck in a three-way 
 
 Try it with the sample data first, then with your own scope/estimate text. All sample data in this repo is **synthetic**. Do not put real claim numbers, policy documents, or unredacted photos into a public submission or demo.
 
+## Screenshots
+
+Captured Nov 3, 2026 from the running local app (sample claim: siding and caulk Done, house wrap Not Evidenced, trim paint Out of Scope — $6,080 billed / $4,580 verified / $1,500 flagged):
+
+Desktop:
+
+![ClaimProof desktop screenshot](screenshots/desktop.png)
+
+Mobile (390px):
+
+![ClaimProof mobile screenshot](screenshots/mobile.png)
+
 ## How to run
 
 Requirements: Python 3.10+, no third-party dependencies for the core app.
